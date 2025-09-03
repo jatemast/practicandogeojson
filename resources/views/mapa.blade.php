@@ -2,106 +2,117 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Mapa México - Estados y Municipios</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <title>Mapa de Colombia</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        #map { height: 90vh; margin-top: 10px; }
-        select { margin: 5px; padding: 5px; }
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+        .filter-box {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
-    <h2>Mapa de México</h2>
-
-    <select id="estado">
-        <option value="">Seleccione Estado</option>
-    </select>
-
-    <select id="municipio">
-        <option value="">Seleccione Municipio</option>
-    </select>
-
+    <div class="filter-box">
+        <label for="departamento">Filtrar por departamento: </label>
+        <select id="departamento">
+            <option value="all">Todos</option>
+        </select>
+    </div>
     <div id="map"></div>
 
     <script>
-    const map = L.map('map').setView([23.6345, -102.5528], 5);
+        // Inicializamos el mapa
+        var map = L.map('map').setView([4.5709, -74.2973], 6);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18
-    }).addTo(map);
+        // Capa base
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
 
-    let estadosData = [];
-    let municipiosData = [];
-    let estadoLayer;
-    let municipioLayer;
+        let geojsonLayer;
+        let departamentos = [];
+        let geoData;
 
-    const estadoSelect = document.getElementById('estado');
-    const municipioSelect = document.getElementById('municipio');
+        // Cargar GeoJSON
+        fetch("{{ asset('geojson/co.json') }}")
+            .then(res => res.json())
+            .then(data => {
+                geoData = data;
 
-    // 1. Cargar Estados
-    fetch('https://soymetrix.com/api/estados')
-        .then(res => res.json())
-        .then(data => {
-            estadosData = data.features;
-            estadosData.forEach(e => {
-                const opt = document.createElement('option');
-                opt.value = e.properties.id;
-                opt.textContent = e.properties.nombre || `Estado ${e.properties.id}`;
-                estadoSelect.appendChild(opt);
+                // Guardar todos los departamentos
+                data.features.forEach(f => {
+                    departamentos.push(f.properties.name);
+                });
+
+                // Llenar select con nombres de departamentos
+                let select = document.getElementById('departamento');
+                [...new Set(departamentos)].sort().forEach(dep => {
+                    let option = document.createElement('option');
+                    option.value = dep;
+                    option.text = dep;
+                    select.add(option);
+                });
+
+                // Mostrar todos los departamentos al inicio
+                geojsonLayer = L.geoJSON(data, {
+                    style: {
+                        color: "#3388ff",
+                        weight: 1,
+                        fillOpacity: 0.3
+                    },
+                    onEachFeature: function (feature, layer) {
+                        layer.bindPopup("<b>" + feature.properties.name + "</b>");
+                    }
+                }).addTo(map);
+
+                // Evento para filtrar
+                select.addEventListener('change', function () {
+                    if (geojsonLayer) {
+                        geojsonLayer.clearLayers();
+                    }
+
+                    if (this.value === "all") {
+                        geojsonLayer.addData(data);
+                        map.setView([4.5709, -74.2973], 6); // Resetear vista
+                    } else {
+                        let filtered = {
+                            type: "FeatureCollection",
+                            features: data.features.filter(f => f.properties.name === this.value)
+                        };
+
+                        geojsonLayer = L.geoJSON(filtered, {
+                            style: {
+                                color: "green",
+                                weight: 2,
+                                fillColor: "green",
+                                fillOpacity: 0.5
+                            },
+                            onEachFeature: function (feature, layer) {
+                                layer.bindPopup("<b>" + feature.properties.name + "</b>");
+                            }
+                        }).addTo(map);
+
+                        // Hacer zoom al departamento seleccionado
+                        map.fitBounds(geojsonLayer.getBounds());
+                    }
+                });
             });
-        });
-
-    // 2. Cargar Municipios (una sola vez)
-    fetch('https://soymetrix.com/api/municipios')
-        .then(res => res.json())
-        .then(data => {
-            municipiosData = data.features;
-        });
-
-    // 3. Cuando selecciona un estado
-    estadoSelect.addEventListener('change', function() {
-        if (estadoLayer) map.removeLayer(estadoLayer);
-        if (municipioLayer) map.removeLayer(municipioLayer);
-        municipioSelect.innerHTML = '<option value="">Seleccione Municipio</option>';
-
-        const estadoId = this.value;
-        if (!estadoId) return;
-
-        const estado = estadosData.find(e => e.properties.id == estadoId);
-        if (!estado) return;
-
-        const geom = JSON.parse(estado.geometry);
-        estadoLayer = L.geoJSON(geom, {
-            style: { color: 'blue', weight: 2, fillColor: '#66c2a5', fillOpacity: 0.5 }
-        }).addTo(map);
-        map.fitBounds(estadoLayer.getBounds());
-
-        // Llenar municipios
-        const municipiosFiltrados = municipiosData.filter(m => m.properties.estado_id == estadoId);
-        municipiosFiltrados.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.properties.id;
-            opt.textContent = m.properties.nombre || `Municipio ${m.properties.id}`;
-            municipioSelect.appendChild(opt);
-        });
-    });
-
-    // 4. Cuando selecciona un municipio
-    municipioSelect.addEventListener('change', function() {
-        if (municipioLayer) map.removeLayer(municipioLayer);
-
-        const municipioId = this.value;
-        if (!municipioId) return;
-
-        const municipio = municipiosData.find(m => m.properties.id == municipioId);
-        if (!municipio) return;
-
-        const geom = JSON.parse(municipio.geometry);
-        municipioLayer = L.geoJSON(geom, {
-            style: { color: 'green', weight: 2, fillColor: '#fc8d62', fillOpacity: 0.5 }
-        }).addTo(map);
-        map.fitBounds(municipioLayer.getBounds());
-    });
     </script>
 </body>
 </html>
